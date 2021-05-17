@@ -72,6 +72,8 @@ instance
   genGenesisValue
     ( GenEnv
         _keySpace
+        _dataspace
+        _scriptspace
         Constants {minGenesisOutputVal, maxGenesisOutputVal}
       ) =
       genCoin minGenesisOutputVal maxGenesisOutputVal
@@ -144,7 +146,7 @@ genTimeToLive currentSlot = do
 instance Mock c => MinGenTxout (ShelleyEra c) where
   calcEraMinUTxO _txout pp = (_minUTxOValue pp)
   addValToTxOut v (TxOut a u) = TxOut a (v <+> u)
-  genEraTxOut genVal addrs = do
+  genEraTxOut _genenv genVal addrs = do
      values <- replicateM (length addrs) genVal
      let  makeTxOut (addr,val) = TxOut addr val
      pure (makeTxOut <$> zip addrs values)

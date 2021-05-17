@@ -87,7 +87,7 @@ instance (CryptoClass.Crypto c) => ScriptClass (AllegraEra c) where
   unQuantify _ = unQuantifyTL
 
 instance (CryptoClass.Crypto c, Mock c) => EraGen (AllegraEra c) where
-  genGenesisValue (GenEnv _keySpace Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
+  genGenesisValue (GenEnv _keySpace _dataspace _scriptspace Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
     genCoin minGenesisOutputVal maxGenesisOutputVal
   genEraTxBody _ge = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
@@ -135,9 +135,9 @@ genTxBody _pparams slot ins outs cert wdrl fee upd ad = do
 instance Mock c => MinGenTxout (AllegraEra c) where
   calcEraMinUTxO _txout pp = (_minUTxOValue pp)
   addValToTxOut v (TxOut a u) = TxOut a (v <+> u)
-  genEraTxOut genVal addrs = do
+  genEraTxOut _genenv genVal addrs = do
      values <- replicateM (length addrs) genVal
-     let  makeTxOut (addr,val) = TxOut addr val
+     let makeTxOut (addr,val) = TxOut addr val
      pure (makeTxOut <$> zip addrs values)
 
 {------------------------------------------------------------------------------

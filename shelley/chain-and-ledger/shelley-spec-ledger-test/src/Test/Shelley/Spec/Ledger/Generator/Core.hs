@@ -15,6 +15,8 @@ module Test.Shelley.Spec.Ledger.Generator.Core
   ( AllIssuerKeys (..),
     applyTxBody,
     GenEnv (..),
+    DataSpace(..),
+    ScriptSpace(..),
     KeySpace (..),
     pattern KeySpace,
     NatNonce (..),
@@ -48,6 +50,11 @@ module Test.Shelley.Spec.Ledger.Generator.Core
     genesisAccountState,
     genCoin,
     PreAlonzo,
+    hashData,
+    genPlutus,
+    findPlutus,
+    genData,
+    findData,
   )
 where
 
@@ -177,7 +184,7 @@ import Shelley.Spec.Ledger.UTxO
     pattern UTxO,
   )
 import Test.Cardano.Crypto.VRF.Fake (WithResult (..))
-import Test.QuickCheck (Gen)
+import Test.QuickCheck (Gen,oneof)
 import qualified Test.QuickCheck as QC
 import Test.Shelley.Spec.Ledger.ConcreteCryptoTypes (ExMock, Mock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
@@ -203,9 +210,15 @@ import Test.Shelley.Spec.Ledger.Utils
 
 
 import Shelley.Spec.Ledger.Serialization(ToCBORGroup)
-import Cardano.Ledger.Era(SupportsSegWit(toTxSeq,hashTxSeq))
+import Cardano.Ledger.Era(ValidateScript(..),SupportsSegWit(toTxSeq,hashTxSeq))
 import qualified Cardano.Ledger.Era as Era(TxSeq)
-
+import qualified PlutusTx as Plutus
+import Cardano.Ledger.SafeHash(SafeHash)
+import Cardano.Ledger.Hashes(EraIndependentData)
+import qualified Cardano.Crypto.Hash as Hash
+import Codec.Serialise(serialise)
+import Data.ByteString.Lazy(toStrict)
+import Cardano.Ledger.SafeHash(unsafeMakeSafeHash)
 
 -- | For use in the Serialisation and Example Tests, which assume Shelley, Allegra, or Mary Eras.
 type PreAlonzo era =
@@ -223,9 +236,25 @@ data AllIssuerKeys v (r :: KeyRole) = AllIssuerKeys
   }
   deriving (Show)
 
+type DataHash crypto = SafeHash crypto EraIndependentData
+
+data DataSpace era = DataSpace
+ { dsScripts :: [Plutus.Data],
+   dsHash :: Map (DataHash (Crypto era)) Plutus.Data
+ } deriving Show
+
+data ScriptSpace era = ScriptSpace
+ { ssScripts :: [Core.Script era],  -- ^ We expect only Two Phase Scripts in here.
+   ssHash :: Map (ScriptHash (Crypto era)) (Core.Script era)
+ }
+
+deriving instance Show (Core.Script era) => Show (ScriptSpace era)
+
 -- | Generator environment.
 data GenEnv era = GenEnv
   { geKeySpace :: KeySpace era,
+    geDataSpace :: DataSpace era,
+    geScriptSpapce :: ScriptSpace era,
     geConstants :: Constants
   }
 
@@ -723,3 +752,27 @@ applyTxBody ls pp tx =
       reapRewards
         ((_rewards . _dstate . _delegationState) ls)
         (Map.mapKeys getRwdCred . unWdrl $ getField @"wdrls" tx)
+
+-- ==================================================================
+-- Operations on GenEnv that deal with ScriptSpace and DataSpace
+
+hashData :: forall era. Era era => Plutus.Data -> DataHash (Crypto era)
+hashData x = unsafeMakeSafeHash (Hash.castHash (Hash.hashWith (toStrict . serialise) x))
+
+-- | Choose one of the preallocated PlutusScripts, and return it and its Hash
+genPlutus :: forall era. ValidateScript era => GenEnv era -> Gen(Core.Script era,ScriptHash (Crypto era))
+genPlutus (GenEnv _ _ (ScriptSpace scripts _) _) = hashpair <$> oneof (pure <$> scripts)
+  where hashpair x = (x,hashScript @era x)
+
+-- | Find the preallocated PlutusScript from its Hash.
+findPlutus :: forall era. GenEnv era -> (ScriptHash (Crypto era)) -> Core.Script era
+findPlutus (GenEnv _ _ (ScriptSpace _ mp) _) hsh =  mp Map.!  hsh
+
+-- | Choose one of the preallocated Plutus Data, and return it and its Hash
+genData :: forall era. Era era => GenEnv era -> Gen(Plutus.Data, DataHash (Crypto era))
+genData (GenEnv _ (DataSpace ds _) _ _) = hashpair <$> oneof (pure <$> ds)
+  where hashpair x = (x,hashData @era x)
+
+-- | Find the preallocated Plutus Data from its Hash.
+findData :: forall era. GenEnv era -> DataHash (Crypto era) -> Plutus.Data
+findData (GenEnv _ (DataSpace _ mp) _ _) hsh = mp Map.! hsh

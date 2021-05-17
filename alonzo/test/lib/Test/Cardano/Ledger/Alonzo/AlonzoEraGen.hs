@@ -12,12 +12,18 @@ module Test.Cardano.Ledger.Alonzo.AlonzoEraGen where
 
 import Cardano.Binary (serializeEncoding', toCBOR)
 import Cardano.Ledger.Alonzo (AlonzoEra)
-import Cardano.Ledger.Alonzo.Data as Alonzo (AuxiliaryData (..), Data (..))
+import Cardano.Ledger.Alonzo.Data as Alonzo (AuxiliaryData (..), Data (..), DataHash)
 import Cardano.Ledger.Alonzo.Language (Language (PlutusV1))
 import Cardano.Ledger.Alonzo.PParams (PParams' (..))
 import qualified Cardano.Ledger.Alonzo.PParams as Alonzo (PParams, extendPP, retractPP)
 import Cardano.Ledger.Alonzo.Rules.Utxo (utxoEntrySize)
-import Cardano.Ledger.Alonzo.Scripts as Alonzo (CostModel (..), ExUnits (..), Prices (..), Script (..))
+import Cardano.Ledger.Alonzo.Scripts as Alonzo
+ ( CostModel (..),
+   ExUnits (..),
+   Prices (..),
+   Script (..),
+   alwaysSucceeds,
+ )
 import Cardano.Ledger.Alonzo.Tx (IsValidating (..), ValidatedTx (..))
 import Cardano.Ledger.Alonzo.TxBody (TxBody (..), TxOut (..))
 import Cardano.Ledger.Alonzo.TxWitness (Redeemers (..), TxWitness (..))
@@ -52,11 +58,18 @@ import Test.Cardano.Ledger.MaryEraGen (addTokens, genMint, maryGenesisValue, pol
 import Test.QuickCheck hiding ((><))
 import Test.Shelley.Spec.Ledger.ConcreteCryptoTypes (Mock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
-import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv, genNatural)
+import Test.Shelley.Spec.Ledger.Generator.Core
+  ( GenEnv(..),
+    genNatural,
+    genPlutus,
+    genData,
+  )
 import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), MinGenTxout (..))
 import Test.Shelley.Spec.Ledger.Generator.ScriptClass (Quantifier (..), ScriptClass (..))
 import Test.Shelley.Spec.Ledger.Generator.Update (genM, genShelleyPParamsDelta)
 import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParams)
+import Shelley.Spec.Ledger.Address(Addr(..))
+import Shelley.Spec.Ledger.Credential(Credential(..))
 
 -- ================================================================
 
@@ -204,6 +217,7 @@ instance HasField "_minUTxOValue" (Alonzo.PParams (AlonzoEra c)) Coin where
 instance Mock c => EraGen (AlonzoEra c) where
   genEraAuxiliaryData = genAux
   genGenesisValue = maryGenesisValue
+  genEraTwoPhaseScripts = [alwaysSucceeds 1]
   genEraTxBody = genAlonzoTxBody
   updateEraTxBody txb coinx txin txout = new
     where
@@ -216,11 +230,20 @@ instance Mock c => EraGen (AlonzoEra c) where
 instance Mock c => MinGenTxout (AlonzoEra c) where
   calcEraMinUTxO tout pp = (utxoEntrySize tout <×> getField @"_adaPerUTxOWord" pp)
   addValToTxOut v (TxOut a u b) = TxOut a (v <+> u) b
-  genEraTxOut genVal addrs = do
-    values <- replicateM (length addrs) genVal
-    let pairs = zip addrs values
-        makeTxOut (addr, val) = TxOut addr val SNothing
-    pure (makeTxOut <$> pairs)
+  genEraTxOut genv genVal addrs = do
+    values <- (replicateM (length addrs) genVal)
+    let genHash = do
+           (_,sh) <- genPlutus @(AlonzoEra c) genv
+           (_,dh) <-  genData @(AlonzoEra c) genv
+           pure(sh,SJust dh)
+        genPlutusAddr :: (Addr c) -> Gen(Addr c,StrictMaybe(DataHash c))
+        genPlutusAddr (Addr network (ScriptHashObj shash) stakeref) = do
+           (sh,maybesd) <- frequency [ (4, genHash),(8,pure (shash,SNothing))]
+           pure(Addr network (ScriptHashObj sh) stakeref, maybesd)
+        genPlutusAddr addr = pure (addr,SNothing)
+    pairs <- mapM genPlutusAddr addrs
+    let makeTxOut (addr,maybedhash) val = TxOut addr val maybedhash
+    pure (zipWith makeTxOut pairs values)
 
 someLeaf ::
   forall era.

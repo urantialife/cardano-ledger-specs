@@ -733,3 +733,10 @@ instance
   PrettyA (TxBody era)
   where
   prettyA = ppTxBody
+
+
+instance
+  ( Era era,
+    Show (Core.Value era),
+    PrettyA (Core.Value era)
+  ) => PrettyA (TxOut era) where prettyA x = ppTxOut x

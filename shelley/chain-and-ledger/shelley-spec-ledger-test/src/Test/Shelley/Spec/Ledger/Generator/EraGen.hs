@@ -26,6 +26,7 @@ module Test.Shelley.Spec.Ledger.Generator.EraGen
    MinGenTxout(..),
    Label(..),
    Sets(..),
+   someKeyPairs,
  ) where
 
 import Cardano.Binary (ToCBOR (toCBOR),FromCBOR,Annotator)
@@ -33,9 +34,10 @@ import qualified Cardano.Crypto.Hash as Hash
 import Cardano.Ledger.AuxiliaryData (AuxiliaryDataHash)
 import Cardano.Ledger.Coin (Coin)
 import qualified Cardano.Ledger.Core as Core
-import qualified Cardano.Ledger.Crypto as CC (HASH)
+import qualified Cardano.Ledger.Crypto as CC (HASH,Crypto)
 import Cardano.Ledger.Era (Crypto, ValidateScript (..),TxInBlock)
 import Cardano.Ledger.SafeHash (unsafeMakeSafeHash)
+import Cardano.Ledger.Hashes(ScriptHash)
 import Cardano.Ledger.Shelley.Constraints (UsesPParams(..))
 import Shelley.Spec.Ledger.PParams(Update)
 import Cardano.Slotting.Slot (SlotNo)
@@ -55,14 +57,13 @@ import Shelley.Spec.Ledger.Tx (TxId (TxId))
 import Shelley.Spec.Ledger.TxBody (DCert, TxIn, Wdrl, WitVKey)
 import Shelley.Spec.Ledger.UTxO (UTxO)
 import Shelley.Spec.Ledger.Keys(KeyRole(Witness))
-import Test.QuickCheck (Gen)
+import Test.QuickCheck (Gen,shuffle,choose)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
 import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv (..),
     genesisCoins,
   )
-import Test.Shelley.Spec.Ledger.Generator.Presets (someKeyPairs)
-import Test.Shelley.Spec.Ledger.Generator.ScriptClass (ScriptClass, someScripts)
+import Test.Shelley.Spec.Ledger.Generator.ScriptClass (ScriptClass, someScripts, keyPairs)
 import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Data.Sequence (Seq)
 import Shelley.Spec.Ledger.API
@@ -70,6 +71,7 @@ import Shelley.Spec.Ledger.API
     LedgerEnv,
     LedgerState,
     LedgersEnv,
+    KeyPairs,
   )
 import Shelley.Spec.Ledger.LedgerState (UTxOState (..))
 import Shelley.Spec.Ledger.STS.Chain(CHAIN,ChainState)
@@ -80,7 +82,6 @@ import GHC.Records(HasField(..))
 import Shelley.Spec.Ledger.BaseTypes(UnitInterval)
 import Shelley.Spec.Ledger.PParams(ProtVer)
 import Shelley.Spec.Ledger.Slot (EpochNo)
-import Shelley.Spec.Ledger.Scripts (ScriptHash)
 import Cardano.Ledger.Era (Era)
 import GHC.Natural(Natural)
 import Cardano.Ledger.AuxiliaryData(ValidateAuxiliaryData(..))
@@ -192,7 +193,7 @@ type MinGenTxBody era =
 class Show (Core.TxOut era) => MinGenTxout era where
   calcEraMinUTxO :: Core.TxOut era -> Core.PParams era -> Coin
   addValToTxOut :: Core.Value era -> Core.TxOut era -> Core.TxOut era
-  genEraTxOut :: Gen (Core.Value era) -> [Addr (Crypto era)] -> Gen [Core.TxOut era]
+  genEraTxOut :: GenEnv era -> Gen (Core.Value era) -> [Addr (Crypto era)] -> Gen [Core.TxOut era]
 
 -- ======================================================================================
 -- The EraGen class. Generally one method for each type family in Cardano.Ledger.Core
@@ -212,6 +213,10 @@ class
   where
   -- | Generate a genesis value for the Era
   genGenesisValue :: GenEnv era -> Gen (Core.Value era)
+
+  -- | A list of two-phase scripts that can be chosen when building a transaction
+  genEraTwoPhaseScripts :: [ Core.Script era]
+  genEraTwoPhaseScripts = []
 
   -- | Given some pre-generated data, generate an era-specific TxBody,
   -- and a list of additional scripts for eras that sometimes require
@@ -260,12 +265,20 @@ class
   Generators shared across eras
  -----------------------------------------------------------------------------}
 
+-- | Select between _lower_ and _upper_ keys from 'keyPairs'
+someKeyPairs :: CC.Crypto crypto => Constants -> Int -> Int -> Gen (KeyPairs crypto)
+someKeyPairs c lower upper =
+  take
+    <$> choose (lower, upper)
+    <*> shuffle (keyPairs c)
+
+
 genUtxo0 :: forall era. EraGen era => GenEnv era -> Gen (UTxO era)
-genUtxo0 ge@(GenEnv _ c@Constants {minGenesisUTxOouts, maxGenesisUTxOouts}) = do
+genUtxo0 ge@(GenEnv _ _ _ c@Constants {minGenesisUTxOouts, maxGenesisUTxOouts}) = do
   genesisKeys <- someKeyPairs c minGenesisUTxOouts maxGenesisUTxOouts
   genesisScripts <- someScripts @era c minGenesisUTxOouts maxGenesisUTxOouts
   outs <-
-    (genEraTxOut @era)
+    (genEraTxOut @era ge)
       (genGenesisValue @era ge)
       (fmap (toAddr Testnet) genesisKeys ++ fmap (scriptsToAddr' Testnet) genesisScripts)
   return (genesisCoins genesisId outs)

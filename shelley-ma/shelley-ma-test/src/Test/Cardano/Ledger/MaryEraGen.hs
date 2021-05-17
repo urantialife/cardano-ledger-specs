@@ -108,7 +108,7 @@ genAuxiliaryData Constants {frequencyTxWithMetadata} =
 
 -- | Carefully crafted to apply in any Era where Core.Value is Value
 maryGenesisValue :: forall era crypto. CryptoClass.Crypto crypto =>  GenEnv era -> Gen(Value crypto)
-maryGenesisValue (GenEnv _ Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
+maryGenesisValue (GenEnv _ _ _ Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
     Val.inject . Coin <$> exponential minGenesisOutputVal maxGenesisOutputVal
 
 --------------------------------------------------------
@@ -327,7 +327,7 @@ instance Split (Value era) where
 instance Mock c => MinGenTxout (MaryEra c) where
   calcEraMinUTxO _txout pp = (_minUTxOValue pp)
   addValToTxOut v (TxOut a u) = TxOut a (v <+> u)
-  genEraTxOut genVal addrs = do
+  genEraTxOut _genenv genVal addrs = do
      values <- replicateM (length addrs) genVal
      let  makeTxOut (addr,val) = TxOut addr val
      pure (makeTxOut <$> zip addrs values)

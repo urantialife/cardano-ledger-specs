@@ -188,6 +188,8 @@ genTx
              ksIndexedPayScripts,
              ksIndexedStakeScripts
            }
+         _dataspace
+         _scriptspace
          constants
        )
   (LedgerEnv slot txIx pparams reserves)

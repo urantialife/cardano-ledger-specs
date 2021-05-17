@@ -34,12 +34,7 @@ import Shelley.Spec.Ledger.Keys
     hashKey,
     hashVerKeyVRF,
   )
-import Shelley.Spec.Ledger.LedgerState
-  ( KeyPairs,
-  )
 import Shelley.Spec.Ledger.OCert (KESPeriod (..))
-import Test.QuickCheck (Gen)
-import qualified Test.QuickCheck as QC
 import Test.Shelley.Spec.Ledger.Generator.Constants
   ( Constants (..),
     defaultConstants,
@@ -57,16 +52,37 @@ import Test.Shelley.Spec.Ledger.Utils
     slotsPerKESIteration,
   )
 
+import qualified Cardano.Ledger.Core as Abstract
+import Test.Shelley.Spec.Ledger.Generator.EraGen(EraGen(genEraTwoPhaseScripts),someKeyPairs)
+import Data.Proxy(Proxy(..))
+import Cardano.Ledger.Era (Era(..),ValidateScript(hashScript))
+import qualified PlutusTx as P
+
+-- =================================================================
+
 -- | Example generator environment, consisting of default constants and an
 -- corresponding keyspace.
-genEnv ::
-  ScriptClass era =>
-  proxy era ->
+genEnv :: forall era.
+  (EraGen era) =>
+  Proxy era ->
   GenEnv era
 genEnv _ =
   GenEnv
     (keySpace defaultConstants)
+    smallDataSpace
+    (scriptSpace @era (genEraTwoPhaseScripts @era))
     defaultConstants
+
+-- | An Example Script space for use in Trace generators
+scriptSpace :: forall era. ValidateScript era => [Abstract.Script era] -> ScriptSpace era
+scriptSpace scripts = ScriptSpace scripts (Map.fromList [(hashScript @era s,s) | s <- scripts])
+
+smallDataSpace :: forall era. Era era => DataSpace era
+smallDataSpace = DataSpace dats hashmap
+  where dats = [P.I 0, P.I 1, P.I 2, P.I 3,P.List [P.I 1, P.I 3],
+                P.Constr 0 [],P.Constr 1 [P.I 3,P.Constr 0 []]]
+        hashmap = Map.fromList [ (hashData @era d,d) | d <- dats ]
+
 
 -- | Example keyspace for use in generators
 keySpace ::
@@ -81,13 +97,6 @@ keySpace c =
     (stakePoolKeys c)
     (keyPairs c)
     (combinedScripts @era c)
-
--- | Select between _lower_ and _upper_ keys from 'keyPairs'
-someKeyPairs :: CC.Crypto crypto => Constants -> Int -> Int -> Gen (KeyPairs crypto)
-someKeyPairs c lower upper =
-  take
-    <$> QC.choose (lower, upper)
-    <*> QC.shuffle (keyPairs c)
 
 -- Pairs of (genesis key, node keys)
 --
