@@ -17,6 +17,7 @@ module Test.Shelley.Spec.Ledger.Generator.Core
     GenEnv (..),
     DataSpace(..),
     ScriptSpace(..),
+    TwoPhaseInfo(..),
     KeySpace (..),
     pattern KeySpace,
     NatNonce (..),
@@ -94,6 +95,7 @@ import Shelley.Spec.Ledger.BaseTypes
     epochInfo,
     intervalValue,
     stabilityWindow,
+    StrictMaybe(..),
   )
 import Shelley.Spec.Ledger.BlockChain
   ( BHeader (BHeader),
@@ -243,9 +245,23 @@ data DataSpace era = DataSpace
    dsHash :: Map (DataHash (Crypto era)) Plutus.Data
  } deriving Show
 
+data TwoPhaseInfo era = TwoPhaseInfo
+  { getScript :: Core.Script era,    -- ^ A Putus Script
+    getData :: Plutus.Data,          -- ^ A Data that will make it succeed
+    getRedeemer ::                   -- ^ A Redeemer that will make it succeed
+      ( String,                      -- ^ The Tag (data Tag = Spend | Mint | Cert | Rewrd)
+        Word64,                      -- ^ The RedeemerPtr index
+        Plutus.Data,                 -- ^ The redeeming data
+        Word64,                      -- ^ The ExUnits memory count
+        Word64                       -- ^ The ExUnits steps count
+      )
+  }
+
+deriving instance Show (Core.Script era) => Show (TwoPhaseInfo era)
+
 data ScriptSpace era = ScriptSpace
- { ssScripts :: [Core.Script era],  -- ^ We expect only Two Phase Scripts in here.
-   ssHash :: Map (ScriptHash (Crypto era)) (Core.Script era)
+ { ssScripts :: [TwoPhaseInfo era],  -- ^ A list of Two Phase Scripts and their associated data we can use.
+   ssHash :: Map (ScriptHash (Crypto era)) (TwoPhaseInfo era)
  }
 
 deriving instance Show (Core.Script era) => Show (ScriptSpace era)
@@ -760,13 +776,22 @@ hashData :: forall era. Era era => Plutus.Data -> DataHash (Crypto era)
 hashData x = unsafeMakeSafeHash (Hash.castHash (Hash.hashWith (toStrict . serialise) x))
 
 -- | Choose one of the preallocated PlutusScripts, and return it and its Hash
-genPlutus :: forall era. ValidateScript era => GenEnv era -> Gen(Core.Script era,ScriptHash (Crypto era))
+genPlutus :: forall era. ValidateScript era => GenEnv era -> Gen(Core.Script era,ScriptHash (Crypto era),TwoPhaseInfo era)
 genPlutus (GenEnv _ _ (ScriptSpace scripts _) _) = hashpair <$> oneof (pure <$> scripts)
-  where hashpair x = (x,hashScript @era x)
+  where hashpair x = (getScript x,hashScript @era (getScript x), x)
 
--- | Find the preallocated PlutusScript from its Hash.
-findPlutus :: forall era. GenEnv era -> (ScriptHash (Crypto era)) -> Core.Script era
-findPlutus (GenEnv _ _ (ScriptSpace _ mp) _) hsh =  mp Map.!  hsh
+-- | Find the preallocated Script from its Hash.
+findPlutus :: forall era. Era era => GenEnv era -> (ScriptHash (Crypto era)) -> (Core.Script era, StrictMaybe (DataHash (Crypto era)))
+findPlutus (GenEnv keyspace _ (ScriptSpace _ mp) _) hsh =
+  case Map.lookup hsh mp of
+    Just info -> (getScript info, SJust (hashData @era (getData info)))
+    Nothing ->
+      case Map.lookup hsh (ksIndexedPayScripts keyspace) of
+        Just (pay,_stake) -> (pay, SNothing)
+        Nothing ->
+          case Map.lookup hsh (ksIndexedStakeScripts keyspace) of
+            Just(_pay,stake) -> (stake, SNothing)
+            Nothing -> error ("Can't find a Script for the hash: "++show hsh)
 
 -- | Choose one of the preallocated Plutus Data, and return it and its Hash
 genData :: forall era. Era era => GenEnv era -> Gen(Plutus.Data, DataHash (Crypto era))

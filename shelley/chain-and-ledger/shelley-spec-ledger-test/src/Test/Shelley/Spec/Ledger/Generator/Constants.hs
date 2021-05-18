@@ -64,6 +64,8 @@ data Constants = Constants
     maxGenesisOutputVal :: Integer,
     -- | Number of base scripts from which multi sig scripts are built.
     numBaseScripts :: Int,
+    -- | Number of simple scripts which appear in the choices, the remainder are compound (MofN, All, Any, etc.) scripts
+    numSimpleScripts :: Int,
     -- | Relative frequency that a transaction does not include any reward withdrawals
     frequencyNoWithdrawals :: Int,
     -- | Relative frequency that a transaction includes a small number of
@@ -123,6 +125,7 @@ defaultConstants =
       minGenesisOutputVal = 1000000,
       maxGenesisOutputVal = 100000000,
       numBaseScripts = 3,
+      numSimpleScripts = 20,
       frequencyNoWithdrawals = 75,
       frequencyAFewWithdrawals = 20,
       maxAFewWithdrawals = 10,

@@ -40,11 +40,7 @@ import Test.Shelley.Spec.Ledger.Generator.Constants
     defaultConstants,
   )
 import Test.Shelley.Spec.Ledger.Generator.Core
-import Test.Shelley.Spec.Ledger.Generator.ScriptClass
-  ( ScriptClass (..),
-    combinedScripts,
-    keyPairs,
-  )
+import Test.Shelley.Spec.Ledger.Generator.ScriptClass(keyPairs)
 import Test.Shelley.Spec.Ledger.Utils
   ( maxKESIterations,
     mkKESKeyPair,
@@ -52,8 +48,7 @@ import Test.Shelley.Spec.Ledger.Utils
     slotsPerKESIteration,
   )
 
-import qualified Cardano.Ledger.Core as Abstract
-import Test.Shelley.Spec.Ledger.Generator.EraGen(EraGen(genEraTwoPhaseScripts),someKeyPairs)
+import Test.Shelley.Spec.Ledger.Generator.EraGen(EraGen(genEraTwoPhaseScripts),allScripts,someKeyPairs)
 import Data.Proxy(Proxy(..))
 import Cardano.Ledger.Era (Era(..),ValidateScript(hashScript))
 import qualified PlutusTx as P
@@ -74,8 +69,8 @@ genEnv _ =
     defaultConstants
 
 -- | An Example Script space for use in Trace generators
-scriptSpace :: forall era. ValidateScript era => [Abstract.Script era] -> ScriptSpace era
-scriptSpace scripts = ScriptSpace scripts (Map.fromList [(hashScript @era s,s) | s <- scripts])
+scriptSpace :: forall era. ValidateScript era => [TwoPhaseInfo era] -> ScriptSpace era
+scriptSpace scripts = ScriptSpace scripts (Map.fromList [(hashScript @era (getScript s),s) | s <- scripts])
 
 smallDataSpace :: forall era. Era era => DataSpace era
 smallDataSpace = DataSpace dats hashmap
@@ -87,7 +82,7 @@ smallDataSpace = DataSpace dats hashmap
 -- | Example keyspace for use in generators
 keySpace ::
   forall era.
-  ScriptClass era =>
+  EraGen era =>
   Constants ->
   KeySpace era
 keySpace c =
@@ -96,7 +91,7 @@ keySpace c =
     (genesisDelegates c)
     (stakePoolKeys c)
     (keyPairs c)
-    (combinedScripts @era c)
+    (allScripts @era c)
 
 -- Pairs of (genesis key, node keys)
 --

@@ -27,6 +27,7 @@ module Test.Shelley.Spec.Ledger.Generator.EraGen
    Label(..),
    Sets(..),
    someKeyPairs,
+   allScripts,
  ) where
 
 import Cardano.Binary (ToCBOR (toCBOR),FromCBOR,Annotator)
@@ -61,9 +62,10 @@ import Test.QuickCheck (Gen,shuffle,choose)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
 import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv (..),
+    TwoPhaseInfo(..),
     genesisCoins,
   )
-import Test.Shelley.Spec.Ledger.Generator.ScriptClass (ScriptClass, someScripts, keyPairs)
+import Test.Shelley.Spec.Ledger.Generator.ScriptClass (ScriptClass, combinedScripts, baseScripts,  keyPairs)
 import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Data.Sequence (Seq)
 import Shelley.Spec.Ledger.API
@@ -215,7 +217,7 @@ class
   genGenesisValue :: GenEnv era -> Gen (Core.Value era)
 
   -- | A list of two-phase scripts that can be chosen when building a transaction
-  genEraTwoPhaseScripts :: [ Core.Script era]
+  genEraTwoPhaseScripts :: [ TwoPhaseInfo era]
   genEraTwoPhaseScripts = []
 
   -- | Given some pre-generated data, generate an era-specific TxBody,
@@ -298,6 +300,27 @@ genesisId = TxId (unsafeMakeSafeHash (mkDummyHash 0))
   where
     mkDummyHash :: forall h a. Hash.HashAlgorithm h => Int -> Hash.Hash h a
     mkDummyHash = coerce . Hash.hashWithSerialiser @h toCBOR
+
+-- ==========================================================
+
+
+-- | Select between _lower_ and _upper_ scripts from the possible combinations
+-- of the first `numBaseScripts` multi-sig scripts of `mSigScripts` (i.e compound scripts) AND
+-- some simple scripts (NOT compound. ie either signature or Plutus scripts).
+someScripts ::
+  forall era.
+  EraGen era =>
+  Constants ->
+  Int ->
+  Int ->
+  Gen [(Core.Script era, Core.Script era)]
+someScripts c lower upper = take <$> choose (lower, upper) <*> shuffle (allScripts @era c)
+
+allScripts:: forall era. EraGen era => Constants -> [(Core.Script era, Core.Script era)]
+allScripts c = (zipWith combine genEraTwoPhaseScripts (baseScripts @era c) ++ combinedScripts @era c)
+    where -- make pairs of scripts (payment,staking) where the payment part is a PlutusScript
+          combine :: TwoPhaseInfo era -> (Core.Script era, Core.Script era) -> (Core.Script era, Core.Script era)
+          combine info (_,stake) = (getScript info,stake)
 
 
 -- =========================================================

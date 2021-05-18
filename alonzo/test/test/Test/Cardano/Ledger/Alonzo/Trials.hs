@@ -39,6 +39,7 @@ module Test.Cardano.Ledger.Alonzo.Trials
     dataspace,
     scriptspace,
     theutxo,
+    alls,
   )
 where
 
@@ -79,7 +80,7 @@ import Test.Cardano.Ledger.EraBuffet (TestCrypto)
 import Test.Shelley.Spec.Ledger.Generator.Block (genBlock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
 import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv (..), KeySpace (..), DataSpace(..), ScriptSpace(..))
-import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), genUtxo0,)
+import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), genUtxo0, allScripts)
 import Test.Shelley.Spec.Ledger.Generator.Presets (genEnv)
 import Test.Shelley.Spec.Ledger.Generator.ShelleyEraGen ()
 import Test.Shelley.Spec.Ledger.Generator.Trace.Chain (mkGenesisChainState)
@@ -206,6 +207,8 @@ theutxo :: IO ()
 theutxo = do utx <- generate (genUtxo0 genenv0)
              putStrLn(show(prettyA utx))
 
+alls :: [(PDoc,PDoc)]
+alls =  (\(x, y) -> (ppScript x, ppScript y)) <$> (allScripts @(AlonzoEra TestCrypto) _constants)
 
 -- ====================================================================================
 -- A few sets of property tests we can use to run in different Scenarios.

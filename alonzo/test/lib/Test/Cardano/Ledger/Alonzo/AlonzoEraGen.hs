@@ -62,7 +62,9 @@ import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv(..),
     genNatural,
     genPlutus,
-    genData,
+    findPlutus,
+    TwoPhaseInfo(..),
+    hashData,
   )
 import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), MinGenTxout (..))
 import Test.Shelley.Spec.Ledger.Generator.ScriptClass (Quantifier (..), ScriptClass (..))
@@ -70,6 +72,7 @@ import Test.Shelley.Spec.Ledger.Generator.Update (genM, genShelleyPParamsDelta)
 import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParams)
 import Shelley.Spec.Ledger.Address(Addr(..))
 import Shelley.Spec.Ledger.Credential(Credential(..))
+import qualified PlutusTx as P (Data (..))
 
 -- ================================================================
 
@@ -114,9 +117,11 @@ genAux constants =
 
 instance CC.Crypto c => ScriptClass (AlonzoEra c) where
   -- basescript _ key = TimelockScript (basescript (Proxy @(MaryEra c)) key) -- The old style from Mary
-  basescript proxy key = TimelockScript (someLeaf proxy key)
+  basescript proxy key = (someLeaf proxy key)
   isKey _ (TimelockScript x) = isKey (Proxy @(MaryEra c)) x
   isKey _ (PlutusScript _) = Nothing
+  isOnePhase _ (TimelockScript _) = True
+  isOnePhase _ (PlutusScript _) = False
   quantify _ (TimelockScript x) = fmap TimelockScript (quantify (Proxy @(MaryEra c)) x)
   quantify _ x = Leaf x
   unQuantify _ quant = TimelockScript $ unQuantify (Proxy @(MaryEra c)) (fmap unTime quant)
@@ -217,7 +222,11 @@ instance HasField "_minUTxOValue" (Alonzo.PParams (AlonzoEra c)) Coin where
 instance Mock c => EraGen (AlonzoEra c) where
   genEraAuxiliaryData = genAux
   genGenesisValue = maryGenesisValue
-  genEraTwoPhaseScripts = [alwaysSucceeds 1]
+  genEraTwoPhaseScripts = [TwoPhaseInfo (alwaysSucceeds 1) (P.I 1) ("Spend",1,P.I 1,10,10) ,
+                           TwoPhaseInfo (alwaysSucceeds 2) (P.I 2) ("Spend",1,P.I 2,10,10) ,
+                           TwoPhaseInfo (alwaysSucceeds 3) (P.I 3) ("Spend",1,P.I 3,10,10) ,
+                           TwoPhaseInfo (alwaysSucceeds 4) (P.I 4) ("Spend",1,P.I 4,10,10)
+                          ]
   genEraTxBody = genAlonzoTxBody
   updateEraTxBody txb coinx txin txout = new
     where
@@ -232,29 +241,21 @@ instance Mock c => MinGenTxout (AlonzoEra c) where
   addValToTxOut v (TxOut a u b) = TxOut a (v <+> u) b
   genEraTxOut genv genVal addrs = do
     values <- (replicateM (length addrs) genVal)
-    let genHash = do
-           (_,sh) <- genPlutus @(AlonzoEra c) genv
-           (_,dh) <-  genData @(AlonzoEra c) genv
-           pure(sh,SJust dh)
-        genPlutusAddr :: (Addr c) -> Gen(Addr c,StrictMaybe(DataHash c))
-        genPlutusAddr (Addr network (ScriptHashObj shash) stakeref) = do
-           (sh,maybesd) <- frequency [ (4, genHash),(8,pure (shash,SNothing))]
-           pure(Addr network (ScriptHashObj sh) stakeref, maybesd)
-        genPlutusAddr addr = pure (addr,SNothing)
-    pairs <- mapM genPlutusAddr addrs
-    let makeTxOut (addr,maybedhash) val = TxOut addr val maybedhash
-    pure (zipWith makeTxOut pairs values)
+    let makeTxOut (addr@(Addr network (ScriptHashObj shash) stakeref)) val = TxOut addr val maybedatahash
+          where (_,maybedatahash) = findPlutus genv shash
+        makeTxOut addr val = TxOut addr val SNothing
+    pure (zipWith makeTxOut addrs values)
 
 someLeaf ::
   forall era.
   Era era =>
   Proxy era ->
   KeyHash 'Witness (Crypto era) ->
-  Timelock (Crypto era)
+  Script era
 someLeaf _proxy x =
   let n = hash (serializeEncoding' (toCBOR x)) -- We don't really care about the hash, we only
       slot = SlotNo (fromIntegral (mod n 200)) -- use it to pseudo-randomly pick a slot and mode
-      mode = mod n 3 -- mode==0 is a time leaf, mode=1 or 2 is a signature leaf
+      mode = mod n 3 -- mode==0 is a time leaf,  mode 1 or 2 is a signature leaf
    in case mode of
-        0 -> (RequireAnyOf . Seq.fromList) [RequireTimeStart slot, RequireTimeExpire slot]
-        _ -> RequireSignature x
+        0 -> TimelockScript $ (RequireAnyOf . Seq.fromList) [RequireTimeStart slot, RequireTimeExpire slot]
+        _ -> TimelockScript $ RequireSignature x
