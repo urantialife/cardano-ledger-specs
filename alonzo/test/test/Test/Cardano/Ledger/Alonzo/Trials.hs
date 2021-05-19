@@ -40,6 +40,8 @@ module Test.Cardano.Ledger.Alonzo.Trials
     scriptspace,
     theutxo,
     alls,
+    d1,
+    d2,
   )
 where
 
@@ -79,7 +81,7 @@ import Test.Cardano.Ledger.Alonzo.AlonzoEraGen ()
 import Test.Cardano.Ledger.EraBuffet (TestCrypto)
 import Test.Shelley.Spec.Ledger.Generator.Block (genBlock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
-import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv (..), KeySpace (..), DataSpace(..), ScriptSpace(..))
+import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv (..), KeySpace (..), DataSpace(..), ScriptSpace(..), hashData)
 import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), genUtxo0, allScripts)
 import Test.Shelley.Spec.Ledger.Generator.Presets (genEnv)
 import Test.Shelley.Spec.Ledger.Generator.ShelleyEraGen ()
@@ -104,6 +106,12 @@ import Test.Shelley.Spec.Ledger.PropertyTests
 import Cardano.Ledger.Alonzo.TxBody()
 import Test.Tasty
 import Test.Tasty.QuickCheck
+
+import Cardano.Ledger.Alonzo.Data(Data(..))
+import qualified PlutusTx as P (Data (..))
+import Cardano.Ledger.SafeHash(SafeHash, hashAnnotated)
+import Cardano.Ledger.Hashes(EraIndependentData)
+
 
 -- ======================================================================
 -- These instances are needed to make property tests in the Alonzo era
@@ -209,6 +217,18 @@ theutxo = do utx <- generate (genUtxo0 genenv0)
 
 alls :: [(PDoc,PDoc)]
 alls =  (\(x, y) -> (ppScript x, ppScript y)) <$> (allScripts @(AlonzoEra TestCrypto) _constants)
+
+d1 :: P.Data
+d1 = P.I 4
+
+d2 :: Data (AlonzoEra TestCrypto)
+d2 = (Data (P.I 4))
+
+d3 :: SafeHash TestCrypto EraIndependentData
+d3 = hashAnnotated d2
+
+d4 :: SafeHash TestCrypto EraIndependentData
+d4 = hashData @(AlonzoEra TestCrypto) d1
 
 -- ====================================================================================
 -- A few sets of property tests we can use to run in different Scenarios.

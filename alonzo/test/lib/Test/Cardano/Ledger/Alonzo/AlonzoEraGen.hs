@@ -17,6 +17,7 @@ import Cardano.Ledger.Alonzo.Language (Language (PlutusV1))
 import Cardano.Ledger.Alonzo.PParams (PParams' (..))
 import qualified Cardano.Ledger.Alonzo.PParams as Alonzo (PParams, extendPP, retractPP)
 import Cardano.Ledger.Alonzo.Rules.Utxo (utxoEntrySize)
+import Cardano.Ledger.Alonzo.Scripts(Tag(..))
 import Cardano.Ledger.Alonzo.Scripts as Alonzo
  ( CostModel (..),
    ExUnits (..),
@@ -24,14 +25,15 @@ import Cardano.Ledger.Alonzo.Scripts as Alonzo
    Script (..),
    alwaysSucceeds,
  )
-import Cardano.Ledger.Alonzo.Tx (IsValidating (..), ValidatedTx (..))
+import Cardano.Ledger.Alonzo.Tx (IsValidating (..), ValidatedTx (..), hashWitnessPPData)
 import Cardano.Ledger.Alonzo.TxBody (TxBody (..), TxOut (..))
-import Cardano.Ledger.Alonzo.TxWitness (Redeemers (..), TxWitness (..))
+import Cardano.Ledger.Alonzo.TxWitness (Redeemers (..), TxWitness (..), RdmrPtr(..))
 import Cardano.Ledger.AuxiliaryData (AuxiliaryDataHash)
 import Cardano.Ledger.Coin (Coin (..))
 import qualified Cardano.Ledger.Core as Core (PParams, PParamsDelta, Script)
 import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era (Crypto, Era (..))
+import Cardano.Ledger.Hashes(ScriptHash)
 import Cardano.Ledger.Mary (MaryEra)
 import Cardano.Ledger.Mary.Value (policies)
 import Cardano.Ledger.ShelleyMA.AuxiliaryData as Mary (pattern AuxiliaryData)
@@ -44,7 +46,7 @@ import Data.Hashable (hash)
 import qualified Data.List as List
 import Data.Map as Map
 import Data.Proxy (Proxy (..))
-import Data.Sequence.Strict (StrictSeq)
+import Data.Sequence.Strict (StrictSeq((:|>)))
 import qualified Data.Sequence.Strict as Seq (fromList)
 import Data.Set as Set
 import GHC.Records (HasField (..))
@@ -61,9 +63,9 @@ import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
 import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv(..),
     genNatural,
-    genPlutus,
     findPlutus,
     TwoPhaseInfo(..),
+    ScriptInfo,
     hashData,
   )
 import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), MinGenTxout (..))
@@ -73,6 +75,8 @@ import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParam
 import Shelley.Spec.Ledger.Address(Addr(..))
 import Shelley.Spec.Ledger.Credential(Credential(..))
 import qualified PlutusTx as P (Data (..))
+import Debug.Trace(trace)
+import Cardano.Ledger.Pretty(PrettyA(..))
 
 -- ================================================================
 
@@ -167,8 +171,8 @@ genAlonzoTxBody _genenv pparams currentslot input txOuts certs wdrls fee updates
         -- reqSignerHashes
         Set.empty -- TODO do something better here
         minted2
-        -- wppHash
-        SNothing -- TODO do something better here
+        -- wppHash starts out with empty Redeemers, as Remdeemers are added it is recomputed in updateEraTxBody
+        (hashWitnessPPData pparams (Set.singleton PlutusV1) (Redeemers Map.empty))
         auxDHash
         netid,
       List.map TimelockScript scriptsFromPolicies
@@ -228,20 +232,56 @@ instance Mock c => EraGen (AlonzoEra c) where
                            TwoPhaseInfo (alwaysSucceeds 4) (P.I 4) ("Spend",1,P.I 4,10,10)
                           ]
   genEraTxBody = genAlonzoTxBody
-  updateEraTxBody txb coinx txin txout = new
+  updateEraTxBody pp witnesses txb coinx txin txout = (trace ("\nUPDATE BODY\n"++show(prettyA new)) new)
     where
-      new = txb {inputs = txin, txfee = coinx, outputs = txout}
+      new = txb { inputs = (inputs txb) <> txin,
+                  collateral = (collateral txb) <> txin,  -- In Alonzo, extra inputs also are added to collateral
+                  txfee = coinx,
+                  outputs = (outputs txb) :|> txout,
+                  -- The witnesses may have changed, recompute the wpphash.
+                  wppHash = hashWitnessPPData pp (Set.singleton PlutusV1) (getField @"txrdmrs" (trace ("\nWIT "++show(prettyA witnesses)) witnesses))
+                }
   genEraPParamsDelta = genAlonzoPParamsDelta
   genEraPParams = genAlonzoPParams
-  genEraWitnesses setWitVKey mapScriptWit = TxWitness setWitVKey Set.empty mapScriptWit Map.empty (Redeemers Map.empty)
+  genEraWitnesses scriptinfo setWitVKey mapScriptWit =
+      TxWitness setWitVKey
+                Set.empty
+                mapScriptWit
+                (getDataMap scriptinfo mapScriptWit)
+                (Redeemers (getRedeemMap scriptinfo mapScriptWit))
   unsafeApplyTx (Tx bod wit auxdata) = ValidatedTx bod wit (IsValidating True) auxdata
+
+
+getDataMap :: forall era. Era era => ScriptInfo era -> Map (ScriptHash (Crypto era)) (Core.Script era) -> Map (DataHash (Crypto era)) (Data era)
+getDataMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
+  where accum ans hsh _script =
+           case Map.lookup hsh scriptinfo of
+              Nothing -> ans
+              Just(TwoPhaseInfo _script dat _redeem) -> Map.insert (hashData @era dat) (Data dat) ans
+
+getRedeemMap :: forall era. ScriptInfo era -> Map (ScriptHash (Crypto era)) (Core.Script era) -> Map RdmrPtr (Data era,ExUnits)
+getRedeemMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
+  where to "Spend" = Just Spend
+        to "Cert" = Just Cert
+        to "Mint" = Just Mint
+        to "Rewrd" = Just Rewrd
+        to _ = Nothing
+        accum ans hsh _script =
+           case Map.lookup hsh scriptinfo of
+              Nothing -> ans
+              Just(TwoPhaseInfo _ _ (tagstring,index,dat,space,steps)) ->
+                case to tagstring of
+                  Just tag -> Map.insert (RdmrPtr tag index) (Data dat,ExUnits space steps) ans
+                  Nothing -> ans
+
+
 
 instance Mock c => MinGenTxout (AlonzoEra c) where
   calcEraMinUTxO tout pp = (utxoEntrySize tout <×> getField @"_adaPerUTxOWord" pp)
   addValToTxOut v (TxOut a u b) = TxOut a (v <+> u) b
   genEraTxOut genv genVal addrs = do
     values <- (replicateM (length addrs) genVal)
-    let makeTxOut (addr@(Addr network (ScriptHashObj shash) stakeref)) val = TxOut addr val maybedatahash
+    let makeTxOut (addr@(Addr _network (ScriptHashObj shash) _stakeref)) val = TxOut addr val maybedatahash
           where (_,maybedatahash) = findPlutus genv shash
         makeTxOut addr val = TxOut addr val SNothing
     pure (zipWith makeTxOut addrs values)

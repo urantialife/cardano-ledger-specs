@@ -91,11 +91,11 @@ instance (CryptoClass.Crypto c, Mock c) => EraGen (AllegraEra c) where
     genCoin minGenesisOutputVal maxGenesisOutputVal
   genEraTxBody _ge = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
-  updateEraTxBody (TxBody _in _out cert wdrl _txfee vi upd ad forge) fee ins outs =
-    TxBody ins outs cert wdrl fee vi upd ad forge
+  updateEraTxBody _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd ad forge) fee ins out =
+    TxBody (existingins <> ins) (outs :|> out) cert wdrl fee vi upd ad forge
   genEraPParamsDelta = genShelleyPParamsDelta
   genEraPParams = genPParams
-  genEraWitnesses setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
+  genEraWitnesses _scriptinfo setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
   unsafeApplyTx x = x
 
 genTxBody ::

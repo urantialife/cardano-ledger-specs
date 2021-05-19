@@ -18,6 +18,7 @@ module Test.Shelley.Spec.Ledger.Generator.Core
     DataSpace(..),
     ScriptSpace(..),
     TwoPhaseInfo(..),
+    ScriptInfo,
     KeySpace (..),
     pattern KeySpace,
     NatNonce (..),
@@ -239,6 +240,7 @@ data AllIssuerKeys v (r :: KeyRole) = AllIssuerKeys
   deriving (Show)
 
 type DataHash crypto = SafeHash crypto EraIndependentData
+type ScriptInfo era = Map (ScriptHash (Crypto era)) (TwoPhaseInfo era)
 
 data DataSpace era = DataSpace
  { dsScripts :: [Plutus.Data],
@@ -261,7 +263,7 @@ deriving instance Show (Core.Script era) => Show (TwoPhaseInfo era)
 
 data ScriptSpace era = ScriptSpace
  { ssScripts :: [TwoPhaseInfo era],  -- ^ A list of Two Phase Scripts and their associated data we can use.
-   ssHash :: Map (ScriptHash (Crypto era)) (TwoPhaseInfo era)
+   ssHash :: Map (ScriptHash (Crypto era)) (TwoPhaseInfo era) -- ^ Also called (ScriptInfo era)
  }
 
 deriving instance Show (Core.Script era) => Show (ScriptSpace era)

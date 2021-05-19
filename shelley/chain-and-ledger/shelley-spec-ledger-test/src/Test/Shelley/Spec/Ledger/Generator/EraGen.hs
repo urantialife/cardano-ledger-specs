@@ -63,6 +63,7 @@ import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
 import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv (..),
     TwoPhaseInfo(..),
+    ScriptInfo,
     genesisCoins,
   )
 import Test.Shelley.Spec.Ledger.Generator.ScriptClass (ScriptClass, combinedScripts, baseScripts,  keyPairs)
@@ -241,10 +242,12 @@ class
 
   -- | Update an era-specific TxBody
   updateEraTxBody ::
+    Core.PParams era ->
+    Core.Witnesses era ->
     Core.TxBody era ->
-    Coin ->
-    Set (TxIn (Crypto era)) ->
-    StrictSeq (Core.TxOut era) ->
+    Coin ->                          -- | This overrides the existing TxFee
+    Set (TxIn (Crypto era)) ->       -- | This is to be Unioned with the existing TxIn
+    (Core.TxOut era) ->              -- | This is to be Appended to the end of the existing TxOut
     Core.TxBody era
 
   genEraPParamsDelta :: Constants -> Core.PParams era -> Gen (Core.PParamsDelta era)
@@ -255,6 +258,7 @@ class
    -- use Test.Shelley.Spec.Ledger.Generator.Update(genDecentralisationParam) in your instance.
 
   genEraWitnesses ::
+     ScriptInfo era ->
      (Set (WitVKey 'Witness (Crypto era))) ->
      Map (ScriptHash (Crypto era)) (Core.Script era) ->
      Core.Witnesses era

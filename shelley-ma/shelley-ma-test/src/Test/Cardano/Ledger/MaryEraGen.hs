@@ -89,11 +89,11 @@ instance (CryptoClass.Crypto c, Mock c) => EraGen (MaryEra c) where
   genGenesisValue = maryGenesisValue
   genEraTxBody _ge = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
-  updateEraTxBody (TxBody _in _out cert wdrl _txfee vi upd meta mint) fee ins outs =
-    TxBody ins outs cert wdrl fee vi upd meta mint
+  updateEraTxBody _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd meta mint) fee ins out =
+    TxBody (existingins <> ins) (outs :|> out) cert wdrl fee vi upd meta mint
   genEraPParamsDelta = genShelleyPParamsDelta
   genEraPParams = genPParams
-  genEraWitnesses setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
+  genEraWitnesses _scriptinfo setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
   unsafeApplyTx x = x
 
 genAuxiliaryData ::
