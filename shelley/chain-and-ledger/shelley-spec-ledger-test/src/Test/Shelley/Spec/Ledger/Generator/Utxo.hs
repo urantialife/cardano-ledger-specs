@@ -118,7 +118,7 @@ import Debug.Trace(trace)
 import Cardano.Ledger.Pretty(PrettyA(..))
 
 ptrace :: PrettyA t => [Char] -> t -> a -> a
-ptrace x y z = trace ("\n"+++show(prettyA y)++"\n"++show x) z
+ptrace x y z = trace ("\n"++show(prettyA y)++"\n"++show x) z
 
 -- =======================================================
 
@@ -377,7 +377,7 @@ genNextDelta
   tx
   count
   delta@(Delta dfees extraInputs extraWitnesses change _ _) =
-    let !baseTxFee = minfee pparams (ptrace ("GenNextDelta " ++show count) tx tx)
+    let !baseTxFee = minfee pparams (trace ("GenNextDelta " ++show count) tx)
         encodedLen x = fromIntegral $ BSL.length (serialize x)
         -- based on the current contents of delta, how much will the fee
         -- increase when we add the delta to the tx?
@@ -534,7 +534,7 @@ applyDelta
             kw
             sw
             (hashAnnotated body2)
-     in tx {body = body2, wits = newWitnessSet}
+     in tx {body = body2, wits = (ptrace "Witness in Apply Delta" newWitnessSet newWitnessSet)}
 
 fix :: (Eq d, Monad m) => Int -> (Int -> d -> m d) -> d -> m d
 fix n f d = do d1 <- f n d; if d1 == d then pure d else fix (n+1) f d1

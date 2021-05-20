@@ -41,7 +41,7 @@ module Test.Cardano.Ledger.Alonzo.Trials
     theutxo,
     alls,
     d1,
-    d2,
+    d2,d3,d4,
   )
 where
 
