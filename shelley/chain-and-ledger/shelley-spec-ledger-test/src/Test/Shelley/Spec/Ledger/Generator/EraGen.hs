@@ -90,6 +90,7 @@ import GHC.Natural(Natural)
 import Cardano.Ledger.AuxiliaryData(ValidateAuxiliaryData(..))
 import NoThunks.Class(NoThunks)
 import Data.Map(Map)
+import Cardano.Ledger.Pretty(PrettyA(..))
 
 
 {------------------------------------------------------------------------------
@@ -210,7 +211,11 @@ class
     MinGenWitnesses era,
     MinGenAuxData era,
     MinGenTxBody era,
-    MinGenTxout era
+    MinGenTxout era,
+    PrettyA (Core.Tx era),
+    PrettyA (Core.TxBody era),
+    PrettyA (Core.Witnesses era),
+    PrettyA (Core.Value era)
   ) =>
   EraGen era
   where

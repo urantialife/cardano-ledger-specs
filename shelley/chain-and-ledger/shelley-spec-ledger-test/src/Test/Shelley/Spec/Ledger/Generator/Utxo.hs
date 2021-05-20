@@ -115,6 +115,10 @@ import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Cardano.Ledger.Era(Era)
 import NoThunks.Class()  -- Instances only
 import Debug.Trace(trace)
+import Cardano.Ledger.Pretty(PrettyA(..))
+
+ptrace :: PrettyA t => [Char] -> t -> a -> a
+ptrace x y z = trace ("\n"+++show(prettyA y)++"\n"++show x) z
 
 -- =======================================================
 
@@ -373,7 +377,7 @@ genNextDelta
   tx
   count
   delta@(Delta dfees extraInputs extraWitnesses change _ _) =
-    let !baseTxFee = minfee pparams (trace ("\nGenNextDelta "++show count) tx)
+    let !baseTxFee = minfee pparams (ptrace ("GenNextDelta " ++show count) tx tx)
         encodedLen x = fromIntegral $ BSL.length (serialize x)
         -- based on the current contents of delta, how much will the fee
         -- increase when we add the delta to the tx?
