@@ -17,7 +17,6 @@ import Cardano.Ledger.Alonzo.Language (Language (PlutusV1))
 import Cardano.Ledger.Alonzo.PParams (PParams' (..))
 import qualified Cardano.Ledger.Alonzo.PParams as Alonzo (PParams, extendPP, retractPP)
 import Cardano.Ledger.Alonzo.Rules.Utxo (utxoEntrySize)
-import Cardano.Ledger.Alonzo.Scripts(Tag(..))
 import Cardano.Ledger.Alonzo.Scripts as Alonzo
  ( CostModel (..),
    ExUnits (..),
@@ -25,7 +24,7 @@ import Cardano.Ledger.Alonzo.Scripts as Alonzo
    Script (..),
    alwaysSucceeds,
  )
-import Cardano.Ledger.Alonzo.Tx (IsValidating (..), ValidatedTx (..), hashWitnessPPData)
+import Cardano.Ledger.Alonzo.Tx (ScriptPurpose(..), IsValidating (..), ValidatedTx (..), hashWitnessPPData, rdptr)
 import Cardano.Ledger.Alonzo.TxBody (TxBody (..), TxOut (..))
 import Cardano.Ledger.Alonzo.TxWitness (Redeemers (..), TxWitness (..), RdmrPtr(..))
 import Cardano.Ledger.AuxiliaryData (AuxiliaryDataHash)
@@ -75,8 +74,15 @@ import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParam
 import Shelley.Spec.Ledger.Address(Addr(..))
 import Shelley.Spec.Ledger.Credential(Credential(..))
 import qualified PlutusTx as P (Data (..))
+import Cardano.Ledger.Alonzo.Rules.Utxow(langsUsed)
+import Cardano.Ledger.Alonzo.PlutusScriptApi(scriptsNeeded,scriptsNeededFromBody)
+import Cardano.Ledger.Era(ValidateScript(..))
+
 import Debug.Trace(trace)
 import Cardano.Ledger.Pretty(PrettyA(..))
+
+ptrace :: PrettyA t => [Char] -> t -> a -> a
+ptrace x y z = trace ("\n"++show(prettyA y)++"\n"++show x) z
 
 -- ================================================================
 
@@ -172,7 +178,7 @@ genAlonzoTxBody _genenv pparams currentslot input txOuts certs wdrls fee updates
         Set.empty -- TODO do something better here
         minted2
         -- wppHash starts out with empty Redeemers, as Remdeemers are added it is recomputed in updateEraTxBody
-        (hashWitnessPPData pparams (Set.singleton PlutusV1) (Redeemers Map.empty))
+        (hashWitnessPPData pparams (langsUsed @(AlonzoEra c) Map.empty) (Redeemers Map.empty))
         auxDHash
         netid,
       List.map TimelockScript scriptsFromPolicies
@@ -232,25 +238,70 @@ instance Mock c => EraGen (AlonzoEra c) where
                            TwoPhaseInfo (alwaysSucceeds 4) (P.I 4) ("Spend",1,P.I 4,10,10)
                           ]
   genEraTxBody = genAlonzoTxBody
-  updateEraTxBody pp witnesses txb coinx txin txout = (trace ("\nUPDATE BODY\n"++show(prettyA new)) new)
+  updateEraTxBody pp witnesses txb coinx txin txout = (trace (show(prettyA new)) new)
     where
       new = txb { inputs = (inputs txb) <> txin,
                   collateral = (collateral txb) <> txin,  -- In Alonzo, extra inputs also are added to collateral
                   txfee = coinx,
                   outputs = (outputs txb) :|> txout,
                   -- The witnesses may have changed, recompute the wpphash.
-                  wppHash = hashWitnessPPData pp (Set.singleton PlutusV1) (getField @"txrdmrs" (trace ("\nWIT "++show(prettyA witnesses)) witnesses))
+                  wppHash = hashWitnessPPData pp (langsUsed @(AlonzoEra c) (getField @"txscripts" witnesses)) (getField @"txrdmrs" witnesses)
                 }
+
+  addInputs txb txin = txb {inputs = (inputs txb) <> txin}
+
   genEraPParamsDelta = genAlonzoPParamsDelta
   genEraPParams = genAlonzoPParams
-  genEraWitnesses scriptinfo setWitVKey mapScriptWit =
-      TxWitness setWitVKey
-                Set.empty
-                mapScriptWit
-                (getDataMap scriptinfo mapScriptWit)
-                (Redeemers (getRedeemMap scriptinfo mapScriptWit))
+  genEraWitnesses (utxo,txbody,scriptinfo) setWitVKey mapScriptWit = (ptrace "Witness" new new)
+    where new = TxWitness setWitVKey
+                 Set.empty
+                 mapScriptWit
+                 (getDataMap scriptinfo mapScriptWit)
+                 (Redeemers rdmrMap)
+          purposeHashPairs = scriptsNeededFromBody @(AlonzoEra c) utxo txbody
+          rdmrMap = List.foldl' accum Map.empty purposeHashPairs -- Search through the pairs for Plutus scripts
+          accum ans (purpose,hash1) =
+            case Map.lookup hash1 mapScriptWit of
+              Nothing -> ans
+              Just script ->
+                 if isNativeScript  @(AlonzoEra c) script
+                    then ans -- Native scripts don't have redeemers
+                    else case Map.lookup hash1 scriptinfo of -- It should be one of the known Plutus Scripts
+                           Nothing -> ans
+                           Just info -> addRedeemMap txbody info purpose ans -- Add it to the redeemer map
+
   unsafeApplyTx (Tx bod wit auxdata) = ValidatedTx bod wit (IsValidating True) auxdata
 
+  updateEraTx utxo scriptinfo (Tx _ _ auxdata) newbody newwit = Tx @(AlonzoEra c) newbody newerwit auxdata
+    where draftTx = Tx @(AlonzoEra c) newbody newwit auxdata
+          purposeHashPairs = scriptsNeeded @(AlonzoEra c) utxo draftTx
+          TxWitness a b c d _ = newwit
+          newerwit = TxWitness a b c d (Redeemers rdmrMap)
+          scriptmap = txscripts newwit
+          rdmrMap = List.foldl' accum Map.empty purposeHashPairs -- Search through the pairs for Plutus scripts
+          accum ans (purpose,hash1) =
+            case Map.lookup hash1 scriptmap of
+              Nothing -> ans
+              Just script ->
+                 if isNativeScript  @(AlonzoEra c) script
+                    then ans -- Native scripts don't have redeemers
+                    else case Map.lookup hash1 scriptinfo of -- It should be one of the known Plutus Scripts
+                           Nothing -> ans
+                           Just info -> addRedeemMap newbody info purpose ans -- Add it to the redeemer map
+
+addRedeemMap :: forall c.
+   TxBody (AlonzoEra c)
+    -> TwoPhaseInfo (AlonzoEra c)
+    -> ScriptPurpose c
+    -> Map RdmrPtr (Data (AlonzoEra c), ExUnits)
+    -> Map RdmrPtr (Data (AlonzoEra c), ExUnits)
+addRedeemMap body1 (TwoPhaseInfo _ _ (_,_,dat,space,steps)) purpose ans =
+  case (purpose, rdptr @(AlonzoEra c) body1 purpose) of
+    (Spending _,SJust ptr) -> Map.insert ptr (Data dat,ExUnits space steps) ans
+    (Minting _,SJust ptr) -> Map.insert ptr (Data dat,ExUnits space steps) ans
+    (Rewarding _,SJust ptr) -> Map.insert ptr (Data dat,ExUnits space steps) ans
+    (Certifying _, SJust ptr) -> Map.insert ptr (Data dat,ExUnits space steps) ans
+    _ -> ans
 
 getDataMap :: forall era. Era era => ScriptInfo era -> Map (ScriptHash (Crypto era)) (Core.Script era) -> Map (DataHash (Crypto era)) (Data era)
 getDataMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
@@ -258,21 +309,6 @@ getDataMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
            case Map.lookup hsh scriptinfo of
               Nothing -> ans
               Just(TwoPhaseInfo _script dat _redeem) -> Map.insert (hashData @era dat) (Data dat) ans
-
-getRedeemMap :: forall era. ScriptInfo era -> Map (ScriptHash (Crypto era)) (Core.Script era) -> Map RdmrPtr (Data era,ExUnits)
-getRedeemMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
-  where to "Spend" = Just Spend
-        to "Cert" = Just Cert
-        to "Mint" = Just Mint
-        to "Rewrd" = Just Rewrd
-        to _ = Nothing
-        accum ans hsh _script =
-           case Map.lookup hsh scriptinfo of
-              Nothing -> ans
-              Just(TwoPhaseInfo _ _ (tagstring,index,dat,space,steps)) ->
-                case to tagstring of
-                  Just tag -> Map.insert (RdmrPtr tag index) (Data dat,ExUnits space steps) ans
-                  Nothing -> ans
 
 
 

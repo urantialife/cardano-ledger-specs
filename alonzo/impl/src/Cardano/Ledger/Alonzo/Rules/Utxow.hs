@@ -90,6 +90,7 @@ import Shelley.Spec.Ledger.TxBody
     unWdrl,
   )
 import Shelley.Spec.Ledger.UTxO (UTxO, txinLookup)
+import Cardano.Ledger.Alonzo.Language (Language (..))
 
 -- =====================================================
 
@@ -184,6 +185,14 @@ decodePredFail n = Invalid n
 
 -- =============================================
 
+-- | given the "txscripts" field of the Witnesses, compute the set of languages used in a transaction
+langsUsed :: forall era. (Core.Script era ~ Script era, ValidateScript era) => Map.Map (ScriptHash (Crypto era)) (Script era) -> Set Language
+langsUsed hashScriptMap =
+    Set.fromList [ l | (_hash, script) <- Map.toList hashScriptMap
+                     , (not . isNativeScript @era) script
+                     , Just l <- [language  @era script] ]
+
+
 {- Defined in the Shelley Utxow rule.
 type ShelleyStyleWitnessNeeds era =
   ( HasField "certs" (Core.TxBody era) (StrictSeq (DCert (Crypto era))),
@@ -273,13 +282,8 @@ alonzoStyleWitness = do
     ?!# MissingRequiredSigners (eval $ reqSignerHashes' ➖ witsKeyHashes)
 
   {-  wppHash txb = hashWitnessPPData pp (languages txw) (txrdmrs txw)  -}
-  let languages =
-        [ l
-          | (_hash, script) <- Map.toList (getField @"scriptWits" tx),
-            (not . isNativeScript @era) script,
-            Just l <- [language @era script]
-        ]
-      computedPPhash = hashWitnessPPData pp (Set.fromList languages) (txrdmrs . wits' $ tx)
+  let languages = langsUsed (getField @"scriptWits" tx)
+      computedPPhash = hashWitnessPPData pp languages (txrdmrs . wits' $ tx)
       bodyPPhash = getField @"wppHash" txbody
   bodyPPhash == computedPPhash ?! PPViewHashesDontMatch bodyPPhash computedPPhash
 

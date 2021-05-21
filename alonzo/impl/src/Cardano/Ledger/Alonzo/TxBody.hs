@@ -707,7 +707,7 @@ ppTxBody (TxBodyConstr (Memo (TxBodyRaw i ifee o c w fee vi u rsh mnt sdh axh ni
   ppRecord
     "TxBody(Alonzo)"
     [ ("inputs", ppSet ppTxIn i),
-      ("inputs_fee", ppSet ppTxIn ifee),
+      ("collateral", ppSet ppTxIn ifee),
       ("outputs", ppStrictSeq ppTxOut o),
       ("certificates", ppStrictSeq ppDCert c),
       ("withdrawals", ppWdrl w),

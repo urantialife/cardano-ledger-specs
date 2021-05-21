@@ -270,9 +270,7 @@ go2 :: IO ()
 go2 =
   defaultMain
     ( localOption
-        -- (QuickCheckReplay (Just 117392)) -- after 206 tests for (OutputTooSmallUTxO ...) error
-        (QuickCheckReplay (Just 88)) -- after 7 tests for (FeeTooSmallUTxO (Coin 2530801) (Coin (-12)))
-        (testProperty "preserves ADA" $ adaPreservationChain @(AllegraEra TestCrypto))
-        -- (propertyTests  @(AlonzoEra TestCrypto))
-        -- (testProperty "Delegation Properties" (delegProperties @(AlonzoEra TestCrypto)))
+        (QuickCheckReplay (Just 213590 ))
+        (testProperty "Chain and Ledger traces cover the relevant cases" (withMaxSuccess 50 (relevantCasesAreCovered @(AlonzoEra TestCrypto))))
+
     )

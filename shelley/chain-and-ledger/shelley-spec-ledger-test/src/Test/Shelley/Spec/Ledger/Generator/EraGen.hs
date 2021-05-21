@@ -86,6 +86,7 @@ import Shelley.Spec.Ledger.BaseTypes(UnitInterval)
 import Shelley.Spec.Ledger.PParams(ProtVer)
 import Shelley.Spec.Ledger.Slot (EpochNo)
 import Cardano.Ledger.Era (Era)
+import Cardano.Ledger.Tx(Tx(..))
 import GHC.Natural(Natural)
 import Cardano.Ledger.AuxiliaryData(ValidateAuxiliaryData(..))
 import NoThunks.Class(NoThunks)
@@ -255,6 +256,12 @@ class
     (Core.TxOut era) ->              -- | This is to be Appended to the end of the existing TxOut
     Core.TxBody era
 
+  addInputs :: Core.TxBody era -> Set (TxIn (Crypto era)) -> Core.TxBody era  -- |  Union the TxIn with the existing TxIn in the TxBody
+  addInputs txb _ins = txb
+
+  updateEraTx :: UTxO era -> ScriptInfo era -> Tx era -> Core.TxBody era -> Core.Witnesses era -> Tx era
+  updateEraTx _utxo _info tx newbody newwit = tx {body = newbody, wits = newwit}
+
   genEraPParamsDelta :: Constants -> Core.PParams era -> Gen (Core.PParamsDelta era)
 
   genEraPParams :: Constants -> Gen (Core.PParams era)
@@ -263,7 +270,7 @@ class
    -- use Test.Shelley.Spec.Ledger.Generator.Update(genDecentralisationParam) in your instance.
 
   genEraWitnesses ::
-     ScriptInfo era ->
+     (UTxO era, Core.TxBody era, ScriptInfo era) ->
      (Set (WitVKey 'Witness (Crypto era))) ->
      Map (ScriptHash (Crypto era)) (Core.Script era) ->
      Core.Witnesses era
