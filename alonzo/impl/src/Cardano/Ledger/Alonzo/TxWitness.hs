@@ -26,6 +26,7 @@ module Cardano.Ledger.Alonzo.TxWitness
       ),
     unRedeemers,
     nullRedeemers,
+    TxDats (TxDats, TxDats'),
     TxWitness
       ( TxWitness,
         txwitsVKey,
@@ -42,6 +43,7 @@ module Cardano.Ledger.Alonzo.TxWitness
       ),
     ppRdmrPtr,
     ppTxWitness,
+    unTxDats,
   )
 where
 
@@ -168,7 +170,7 @@ nullRedeemers = Map.null . unRedeemers
 --      (Set (WitVKey 'Witness (Crypto era)))
 --      (Set (BootstrapWitness (Crypto era)))
 --      (Map (ScriptHash (Crypto era)) (Core.Script era))
---      (Map (DataHash (Crypto era)) (Data era))
+--      (TxDats era)
 --      (Map RdmrPtr (Data era, ExUnits))
 
 -- | Internal 'TxWitness' type, lacking serialised bytes.
@@ -176,7 +178,7 @@ data TxWitnessRaw era = TxWitnessRaw
   { _txwitsVKey :: Set (WitVKey 'Witness (Crypto era)),
     _txwitsBoot :: Set (BootstrapWitness (Crypto era)),
     _txscripts :: Map (ScriptHash (Crypto era)) (Core.Script era),
-    _txdats :: Map (DataHash (Crypto era)) (Data era),
+    _txdats :: TxDats era,
     _txrdmrs :: Redeemers era
   }
   deriving (Generic, Typeable)
@@ -186,10 +188,10 @@ newtype TxWitness era = TxWitnessConstr (MemoBytes (TxWitnessRaw era))
 
 instance (Era era, Core.Script era ~ Script era) => Semigroup (TxWitness era) where
   (<>) (TxWitnessConstr (Memo (TxWitnessRaw a b c d (Redeemers' e)) _)) y
-    | (Set.null a && Set.null b && Map.null c && Map.null d && Map.null e) =
+    | (Set.null a && Set.null b && Map.null c && nullDats d && Map.null e) =
       y
   (<>) y (TxWitnessConstr (Memo (TxWitnessRaw a b c d (Redeemers' e)) _))
-    | (Set.null a && Set.null b && Map.null c && Map.null d && Map.null e) =
+    | (Set.null a && Set.null b && Map.null c && nullDats d && Map.null e) =
       y
   (<>)
     (TxWitnessConstr (Memo (TxWitnessRaw a b c d (Redeemers' e)) _))
@@ -198,6 +200,58 @@ instance (Era era, Core.Script era ~ Script era) => Semigroup (TxWitness era) wh
 
 instance (Era era, Core.Script era ~ Script era) => Monoid (TxWitness era) where
   mempty = TxWitness mempty mempty mempty mempty (Redeemers mempty)
+
+-- =====================================================
+newtype TxDatsRaw era = TxDatsRaw (Map (DataHash (Crypto era)) (Data era))
+  deriving (Generic, Typeable, Eq, Show)
+  deriving newtype (NoThunks)
+
+-- instance Typeable era => ToCBOR (TxDatsRaw era) where
+-- toCBOR (TxDatsRaw m) = (encodeFoldable . Map.elems) m
+
+encodeTxDatsRaw ::
+  ToCBOR (Data era) =>
+  TxDatsRaw era ->
+  Encode ('Closed 'Dense) (TxDatsRaw era)
+encodeTxDatsRaw t = E (encodeFoldable . Map.elems . unTxDatsRaw) t
+  where
+    unTxDatsRaw (TxDatsRaw m) = m
+
+pattern TxDats' :: Map (DataHash (Crypto era)) (Data era) -> TxDats era
+pattern TxDats' m <- TxDatsConstr (Memo (TxDatsRaw m) _)
+
+{-# COMPLETE TxDats' #-}
+
+pattern TxDats :: Typeable era => Map (DataHash (Crypto era)) (Data era) -> TxDats era
+pattern TxDats m <-
+  TxDatsConstr (Memo (TxDatsRaw m) _)
+  where
+    TxDats m = TxDatsConstr $ memoBytes (encodeTxDatsRaw (TxDatsRaw m))
+
+{-# COMPLETE TxDats #-}
+
+unTxDats :: TxDats era -> Map (DataHash (Crypto era)) (Data era)
+unTxDats (TxDats' m) = m
+
+nullDats :: TxDats era -> Bool
+nullDats (TxDats' d) = Map.null d
+
+instance (Typeable era, Era era) => FromCBOR (Annotator (TxDatsRaw era)) where
+  fromCBOR = decode $ fmap (TxDatsRaw . keyBy hashData) <$> listDecodeA From
+
+newtype TxDats era = TxDatsConstr (MemoBytes (TxDatsRaw era))
+  deriving newtype (SafeToHash, ToCBOR, Eq, Show, NoThunks)
+
+instance Typeable era => Semigroup (TxDats era) where
+  (TxDats m) <> (TxDats m') = TxDats (m <> m')
+
+instance Typeable era => Monoid (TxDats era) where
+  mempty = TxDats mempty
+
+deriving via
+  (Mem (TxDatsRaw era))
+  instance
+    (Era era) => FromCBOR (Annotator (TxDats era))
 
 -- =====================================================
 -- TxWitness instances
@@ -231,7 +285,7 @@ pattern TxWitness' ::
   Set (WitVKey 'Witness (Crypto era)) ->
   Set (BootstrapWitness (Crypto era)) ->
   Map (ScriptHash (Crypto era)) (Core.Script era) ->
-  Map (DataHash (Crypto era)) (Data era) ->
+  TxDats era ->
   Redeemers era ->
   TxWitness era
 pattern TxWitness' {txwitsVKey', txwitsBoot', txscripts', txdats', txrdmrs'} <-
@@ -245,7 +299,7 @@ pattern TxWitness ::
   Set (WitVKey 'Witness (Crypto era)) ->
   Set (BootstrapWitness (Crypto era)) ->
   Map (ScriptHash (Crypto era)) (Core.Script era) ->
-  Map (DataHash (Crypto era)) (Data era) ->
+  TxDats era ->
   Redeemers era ->
   TxWitness era
 pattern TxWitness {txwitsVKey, txwitsBoot, txscripts, txdats, txrdmrs} <-
@@ -269,10 +323,7 @@ instance
   where
   getField (TxWitnessConstr (Memo (TxWitnessRaw _ _ s _ _) _)) = s
 
-instance
-  (Crypto era ~ crypto) =>
-  HasField "txdats" (TxWitness era) (Map (DataHash crypto) (Data era))
-  where
+instance HasField "txdats" (TxWitness era) (TxDats era) where
   getField (TxWitnessConstr (Memo (TxWitnessRaw _ _ _ d _) _)) = d
 
 instance HasField "txrdmrs" (TxWitness era) (Redeemers era) where
@@ -295,11 +346,11 @@ instance
 --------------------------------------------------------------------------------
 
 encodeWitnessRaw ::
-  (Era era, Core.Script era ~ Script era, ToCBOR (Data era)) =>
+  (Era era, Core.Script era ~ Script era) =>
   Set (WitVKey 'Witness (Crypto era)) ->
   Set (BootstrapWitness (Crypto era)) ->
   Map (ScriptHash (Crypto era)) (Core.Script era) ->
-  Map (DataHash (Crypto era)) (Data era) ->
+  TxDats era ->
   Redeemers era ->
   Encode ('Closed 'Sparse) (TxWitnessRaw era)
 encodeWitnessRaw vkeys boots scripts dats rdmrs =
@@ -313,7 +364,7 @@ encodeWitnessRaw vkeys boots scripts dats rdmrs =
     !> Omit
       null
       (Key 3 $ E (encodeFoldable . mapMaybe unwrapPS . Map.elems) plutusScripts)
-    !> Omit null (Key 4 $ E (encodeFoldable . Map.elems) dats)
+    !> Omit nullDats (Key 4 $ E toCBOR dats)
     !> Omit nullRedeemers (Key 5 $ To rdmrs)
   where
     unwrapTS (TimelockScript x) = Just x
@@ -386,7 +437,7 @@ instance
       txWitnessField 4 =
         fieldAA
           (\x wits -> wits {_txdats = x})
-          (fmap (keyBy hashData) <$> listDecodeA From)
+          From
       txWitnessField 5 = fieldAA (\x wits -> wits {_txrdmrs = x}) From
       txWitnessField n = field (\_ t -> t) (Invalid n)
 
@@ -400,8 +451,8 @@ instance
         Map (ScriptHash (Crypto e)) (Core.Script e)
       getKeys _ = keyBy (hashScript @e)
 
-      keyBy :: forall a b. Ord b => (a -> b) -> [a] -> Map b a
-      keyBy f xs = Map.fromList $ (\x -> (f x, x)) <$> xs
+keyBy :: forall a b. Ord b => (a -> b) -> [a] -> Map b a
+keyBy f xs = Map.fromList $ (\x -> (f x, x)) <$> xs
 
 deriving via
   (Mem (TxWitnessRaw era))
@@ -427,7 +478,7 @@ ppTxWitness (TxWitnessConstr (Memo (TxWitnessRaw vk wb sc da (Redeemers rd)) _))
     [ ("txwitsVKey", ppSet ppWitVKey vk),
       ("txwitsBoot", ppSet ppBootstrapWitness wb),
       ("txscripts", ppMap ppScriptHash prettyA sc),
-      ("txdats", ppMap ppSafeHash ppData da),
+      ("txdats", ppMap ppSafeHash ppData (unTxDats da)),
       ("txrdmrs", ppMap ppRdmrPtr (ppPair ppData ppExUnits) rd)
     ]
 
